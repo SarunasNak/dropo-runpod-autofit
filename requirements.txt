@@ -1,0 +1,4 @@
+runpod~=1.8.1
+rembg[gpu]==2.0.76
+onnxruntime-gpu==1.23.2
+Pillow==12.3.0
