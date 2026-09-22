@@ -190,70 +190,56 @@ def process_auto(source: Image.Image) -> tuple[bytes, str]:
     return save_jpeg(canvas), mode
 
 
-# ============================================================
-# SIMPLE MODE
-# 5-a ir visos likusios nuotraukos
-# JOKIO AI / JOKIO BACKGROUND REMOVAL
-# ============================================================
-
 def process_simple(source: Image.Image) -> tuple[bytes, str]:
-    """
-    SIMPLE režimas:
 
-    - NEKVIEČIA BiRefNet
-    - NEKERPA fono
-    - išsaugo visą originalios nuotraukos turinį
-    - nekeičia nuotraukos proporcijų
-    - pritaiko prie 2000x2000
-    - likusią vietą užpildo #EDF1EF
-    """
-
-    original_width = source.width
-    original_height = source.height
-
-    print(
-        f"SIMPLE: original image "
-        f"{original_width}x{original_height} "
-        f"- background removal skipped",
-        flush=True,
-    )
-
-    # --------------------------------------------------------
-    # Sutalpiname VISĄ originalią nuotrauką į canvas.
-    #
-    # Jokio crop.
-    # Jokio AI.
-    # Jokio background removal.
-    # --------------------------------------------------------
+    # Jokio AI ir jokio fono šalinimo.
+    # Išsaugome visą originalų kadrą.
 
     fitted = source.copy()
 
-    fitted.thumbnail(
-        (CANVAS_SIZE, CANVAS_SIZE),
+    # Tokia pati LONG / NORMAL logika kaip AUTO režime
+    aspect_ratio = fitted.height / fitted.width
+
+    if aspect_ratio >= 1.65:
+        max_width = int(CANVAS_SIZE * 0.85)
+        max_height = int(CANVAS_SIZE * 0.94)
+        mode = "LONG"
+    else:
+        max_width = CANVAS_SIZE - (MARGIN * 2)
+        max_height = CANVAS_SIZE - (MARGIN * 2)
+        mode = "NORMAL"
+
+    # Proporcingai padidiname arba sumažiname
+    scale = min(
+        max_width / fitted.width,
+        max_height / fitted.height,
+    )
+
+    new_width = max(1, round(fitted.width * scale))
+    new_height = max(1, round(fitted.height * scale))
+
+    fitted = fitted.resize(
+        (new_width, new_height),
         Image.Resampling.LANCZOS,
     )
 
-    # --------------------------------------------------------
     # 2000x2000 canvas
-    # --------------------------------------------------------
-
     canvas = Image.new(
         "RGB",
         (CANVAS_SIZE, CANVAS_SIZE),
         BACKGROUND,
     )
 
-    x = (
-        CANVAS_SIZE - fitted.width
-    ) // 2
+    # Centruojame
+    x = (CANVAS_SIZE - fitted.width) // 2
+    y = (CANVAS_SIZE - fitted.height) // 2
 
-    y = (
-        CANVAS_SIZE - fitted.height
-    ) // 2
+    canvas.paste(fitted, (x, y))
 
-    canvas.paste(
-        fitted,
-        (x, y),
+    print(
+        f"SIMPLE: {source.width}x{source.height} "
+        f"-> {new_width}x{new_height}, mode={mode}, no AI",
+        flush=True,
     )
 
     return save_jpeg(canvas), "SIMPLE"
