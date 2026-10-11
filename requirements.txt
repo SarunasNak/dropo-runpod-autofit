@@ -2,3 +2,5 @@ runpod~=1.8.1
 rembg[gpu]==2.0.76
 onnxruntime-gpu==1.23.2
 Pillow==12.3.0
+torch==2.7.1
+transformers==4.49.0
