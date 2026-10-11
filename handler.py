@@ -62,7 +62,10 @@ SMART_PROMPTS = [
 
 SMART_FULL_COUNT = 6
 
-SMART_FULL_THRESHOLD = 0.90
+SMART_FULL_THRESHOLD = 0.60
+SMART_MASK_SIZE = 640
+SMART_EDGE_WIDTH = 8
+SMART_EDGE_CONTACT_LIMIT = 0.08
 
 with torch.inference_mode():
     clip_text_inputs = clip_processor(
@@ -76,25 +79,123 @@ with torch.inference_mode():
 print(f"CLIP loaded in {time.time() - clip_started:.1f}s", flush=True)
 
 
+def garment_fits_frame(source: Image.Image) -> bool:
+    """
+    Tikrina, ar segmentuotas objektas nėra plačiai
+    nukirstas ties originalios nuotraukos kraštais.
+    """
+
+    preview = source.copy()
+    preview.thumbnail(
+        (SMART_MASK_SIZE, SMART_MASK_SIZE),
+        Image.Resampling.LANCZOS,
+    )
+
+    mask = remove(
+        preview,
+        session=session,
+        only_mask=True,
+    ).convert("L")
+
+    # Pašaliname silpnus segmentavimo artefaktus.
+    mask = mask.point(
+        lambda value: 255 if value >= 128 else 0
+    )
+
+    bbox = mask.getbbox()
+
+    if bbox is None:
+        print("SMART MASK: no object detected", flush=True)
+        return False
+
+    width, height = mask.size
+    edge = SMART_EDGE_WIDTH
+
+    # Kiek foreground pikselių yra kiekviename krašte.
+    left = mask.crop((0, 0, edge, height))
+    right = mask.crop((width - edge, 0, width, height))
+    top = mask.crop((0, 0, width, edge))
+    bottom = mask.crop((0, height - edge, width, height))
+
+    def coverage(region):
+        histogram = region.histogram()
+        foreground = histogram[255]
+        return foreground / (region.width * region.height)
+
+    contacts = {
+        "left": coverage(left),
+        "right": coverage(right),
+        "top": coverage(top),
+        "bottom": coverage(bottom),
+    }
+
+    clipped_edges = [
+        name
+        for name, value in contacts.items()
+        if value > SMART_EDGE_CONTACT_LIMIT
+    ]
+
+    fits = len(clipped_edges) == 0
+
+    print(
+        f"SMART MASK: bbox={bbox}, "
+        f"edges={contacts}, "
+        f"clipped={clipped_edges}, "
+        f"fits={fits}",
+        flush=True,
+    )
+
+    return fits
+
 def detect_image_type(source: Image.Image) -> str:
-    image_inputs = clip_processor(images=source, return_tensors="pt")
+
+    image_inputs = clip_processor(
+        images=source,
+        return_tensors="pt",
+    )
+
     with torch.inference_mode():
+
         image_features = clip_model.get_image_features(
             pixel_values=image_inputs["pixel_values"]
         )
-        image_features = image_features / image_features.norm(
-            dim=-1, keepdim=True
+
+        image_features = (
+            image_features
+            / image_features.norm(dim=-1, keepdim=True)
         )
-        logits = 100.0 * (image_features @ clip_text_features.T)
+
+        logits = 100.0 * (
+            image_features @ clip_text_features.T
+        )
+
         probabilities = logits.softmax(dim=-1)[0]
 
     full_score = probabilities[:SMART_FULL_COUNT].sum().item()
     detail_score = probabilities[SMART_FULL_COUNT:].sum().item()
-    selected = "auto" if full_score >= SMART_FULL_THRESHOLD else "simple"
+
+    # CLIP pirmiausia atmeta aiškias detales.
+    if full_score < SMART_FULL_THRESHOLD:
+
+        selected = "simple"
+        reason = "clip_detail"
+
+    else:
+
+        # Tikriname, ar drabužio kontūras telpa kadre.
+        fits = garment_fits_frame(source)
+
+        selected = "auto" if fits else "simple"
+        reason = "complete_garment" if fits else "cropped_garment"
+
     print(
-        f"SMART: full={full_score:.3f}, detail={detail_score:.3f}, "
-        f"selected={selected}", flush=True
+        f"SMART: full={full_score:.3f}, "
+        f"detail={detail_score:.3f}, "
+        f"selected={selected}, "
+        f"reason={reason}",
+        flush=True,
     )
+
     return selected
 
 
