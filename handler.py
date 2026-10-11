@@ -38,23 +38,31 @@ clip_model = CLIPModel.from_pretrained(CLIP_MODEL_NAME)
 clip_model.eval()
 
 SMART_PROMPTS = [
-    "A product photograph of a complete pair of jeans.",
-    "A product photograph of a complete jacket.",
-    "A product photograph of a complete shirt.",
-    "A product photograph of a complete coat.",
-    "A product photograph of a complete sweater.",
-    "A product photograph of a complete pair of trousers.",
+    # FULL GARMENT
+    "A studio product photo showing an entire pair of jeans from waist to hems.",
+    "A studio product photo showing an entire shirt including its full outline.",
+    "A studio product photo showing an entire jacket including sleeves and hem.",
+    "A studio product photo showing an entire coat from collar to bottom hem.",
+    "A studio product photo showing an entire sweater including both sleeves.",
+    "A studio product photo showing an entire pair of trousers from waist to hems.",
+
+    # PARTIAL GARMENT / DETAIL
+    "A cropped product photograph showing only part of a shirt.",
+    "A close-up photograph of the upper half of a shirt.",
+    "A cropped photograph of a garment with edges extending outside the frame.",
+    "A close-up photograph of a clothing collar and buttons.",
+    "A close-up photograph of a clothing pocket.",
     "A close-up photograph of a clothing brand label.",
     "A close-up photograph of a clothing size or care tag.",
     "A close-up photograph of denim fabric texture.",
     "A close-up photograph of clothing stitching or a seam.",
     "A close-up photograph of a button or zipper on clothing.",
-    "A close-up photograph of a clothing defect or damage.",
-    "A close-up photograph of a clothing pocket or logo.",
+    "A close-up photograph of clothing damage or defects.",
 ]
+
 SMART_FULL_COUNT = 6
-# Conservative starting value, not a validated accuracy guarantee.
-SMART_FULL_THRESHOLD = 0.75
+
+SMART_FULL_THRESHOLD = 0.90
 
 with torch.inference_mode():
     clip_text_inputs = clip_processor(
@@ -262,49 +270,29 @@ def process_simple(source: Image.Image) -> tuple[bytes, str]:
     DETAIL režimas:
     - Jokio BiRefNet
     - Jokio fono šalinimo
-    - Išsaugomas visas originalus kadras
-    - 2000x2000 rezultatas
-    - Foną užpildo iš originalo sukurta
-      išplaukinta versija
+    - Jokio išplaukinto fono
+    - Originali nuotrauka užpildo visą kvadratą
+    - Kraštai apkerpami tik tiek, kiek reikia
+    - Galutinis dydis 2000x2000
     """
 
-    # Originalus kadras
-    original = source.copy().convert("RGB")
+    original = source.convert("RGB")
 
-    # Fonui naudojame tą pačią nuotrauką,
-    # kad nebūtų svetimos spalvos stačiakampio
-    background = ImageOps.fit(
+    canvas = ImageOps.fit(
         original,
         (CANVAS_SIZE, CANVAS_SIZE),
         method=Image.Resampling.LANCZOS,
         centering=(0.5, 0.5),
     )
 
-    # Išplaukiname tik foną
-    background = background.filter(
-        ImageFilter.GaussianBlur(radius=65)
-    )
-
-    # Originalą sutalpiname be apkirpimo
-    fitted = original.copy()
-    fitted.thumbnail(
-        (CANVAS_SIZE, CANVAS_SIZE),
-        Image.Resampling.LANCZOS,
-    )
-
-    x = (CANVAS_SIZE - fitted.width) // 2
-    y = (CANVAS_SIZE - fitted.height) // 2
-
-    background.paste(fitted, (x, y))
-
     print(
         f"DETAIL: {source.width}x{source.height} "
-        f"-> {fitted.width}x{fitted.height}, "
-        f"no AI, no crop",
+        f"-> {CANVAS_SIZE}x{CANVAS_SIZE}, "
+        f"center crop, no AI, no blur",
         flush=True,
     )
 
-    return save_jpeg(background), "DETAIL"
+    return save_jpeg(canvas), "DETAIL"
 
 
 
