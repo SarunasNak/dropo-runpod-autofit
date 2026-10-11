@@ -2,6 +2,8 @@ FROM nvidia/cuda:12.8.1-cudnn-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONFAULTHANDLER=1
+ENV TRANSFORMERS_VERBOSITY=info
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
