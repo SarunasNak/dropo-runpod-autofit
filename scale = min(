@@ -321,7 +321,6 @@ def process_auto(source: Image.Image) -> tuple[bytes, str]:
     scale = min(
         max_width / cutout.width,
         max_height / cutout.height,
-        1.25,
     )
 
     new_width = max(
@@ -379,50 +378,42 @@ def process_detail(source: Image.Image) -> tuple[bytes, str]:
         Image.Resampling.LANCZOS,
     )
 
-    # Remove background using BiRefNet
+    # Remove background
     cutout = remove(
         original,
         session=session,
     ).convert("RGBA")
 
     alpha = cutout.getchannel("A")
-
-    alpha = alpha.filter(
-        ImageFilter.MinFilter(3)
-    )
-
+    alpha = alpha.filter(ImageFilter.MinFilter(3))
     cutout.putalpha(alpha)
 
-    if alpha.getbbox() is None:
+    bbox = alpha.getbbox()
+
+    if bbox is None:
         raise ValueError(
             "DETAIL: AI could not detect the product."
         )
 
-    # Keep original composition.
-    # Do not crop to detected object bbox.
-    # Do not enlarge the garment detail.
+    # Remove empty background
+    cutout = cutout.crop(bbox)
+
+    # Fit detail inside 2000x2000
+    max_width = CANVAS_SIZE - (MARGIN * 2)
+    max_height = CANVAS_SIZE - (MARGIN * 2)
 
     scale = min(
-        CANVAS_SIZE / cutout.width,
-        CANVAS_SIZE / cutout.height,
-        1.0,
+        max_width / cutout.width,
+        max_height / cutout.height,
     )
 
-    new_width = max(
-        1,
-        round(cutout.width * scale),
-    )
+    new_width = max(1, round(cutout.width * scale))
+    new_height = max(1, round(cutout.height * scale))
 
-    new_height = max(
-        1,
-        round(cutout.height * scale),
+    cutout = cutout.resize(
+        (new_width, new_height),
+        Image.Resampling.LANCZOS,
     )
-
-    if scale != 1.0:
-        cutout = cutout.resize(
-            (new_width, new_height),
-            Image.Resampling.LANCZOS,
-        )
 
     canvas = Image.new(
         "RGB",
@@ -437,13 +428,6 @@ def process_detail(source: Image.Image) -> tuple[bytes, str]:
         cutout,
         (x, y),
         cutout,
-    )
-
-    print(
-        f"DETAIL: source={source.width}x{source.height}, "
-        f"object={cutout.width}x{cutout.height}, "
-        f"canvas={CANVAS_SIZE}x{CANVAS_SIZE}",
-        flush=True,
     )
 
     return save_jpeg(canvas), "DETAIL"
