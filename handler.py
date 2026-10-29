@@ -369,7 +369,10 @@ def process_auto(source: Image.Image) -> tuple[bytes, str]:
 # Background removal without object zoom or bbox cropping
 # ============================================================
 
-def process_detail(source: Image.Image) -> tuple[bytes, str]:
+def process_detail(
+    source: Image.Image,
+    keep_edge: str = "bottom",
+) -> tuple[bytes, str]:
 
     original = source.copy()
 
@@ -395,17 +398,39 @@ def process_detail(source: Image.Image) -> tuple[bytes, str]:
             "DETAIL: AI could not detect the product."
         )
 
-    # Remove empty background
-    cutout = cutout.crop(bbox)
+    left, top, right, bottom = bbox
 
-    # Fit detail inside 2000x2000
-    max_width = CANVAS_SIZE - (MARGIN * 2)
-    max_height = CANVAS_SIZE - (MARGIN * 2)
+    if keep_edge == "bottom":
+        # DETAIL TOP:
+        # Preserve original bottom crop.
+        crop_box = (
+            left,
+            top,
+            right,
+            original.height,
+        )
 
-    scale = min(
-        max_width / cutout.width,
-        max_height / cutout.height,
-    )
+    elif keep_edge == "top":
+        # DETAIL BOTTOM:
+        # Preserve original top crop.
+        crop_box = (
+            left,
+            0,
+            right,
+            bottom,
+        )
+
+    else:
+        raise ValueError(
+            f"Invalid DETAIL edge: {keep_edge}"
+        )
+
+    cutout = cutout.crop(crop_box)
+
+    # Scale by width
+    target_width = CANVAS_SIZE - (MARGIN * 2)
+
+    scale = target_width / cutout.width
 
     new_width = max(1, round(cutout.width * scale))
     new_height = max(1, round(cutout.height * scale))
@@ -422,7 +447,16 @@ def process_detail(source: Image.Image) -> tuple[bytes, str]:
     )
 
     x = (CANVAS_SIZE - cutout.width) // 2
-    y = (CANVAS_SIZE - cutout.height) // 2
+
+    if keep_edge == "bottom":
+        # Juosmuo: position near top.
+        y = MARGIN
+        mode = "DETAIL_TOP"
+
+    else:
+        # Klešnės: position near bottom.
+        y = CANVAS_SIZE - MARGIN - cutout.height
+        mode = "DETAIL_BOTTOM"
 
     canvas.paste(
         cutout,
@@ -430,7 +464,14 @@ def process_detail(source: Image.Image) -> tuple[bytes, str]:
         cutout,
     )
 
-    return save_jpeg(canvas), "DETAIL"
+    print(
+        f"{mode}: "
+        f"source={source.width}x{source.height}, "
+        f"object={cutout.width}x{cutout.height}",
+        flush=True,
+    )
+
+    return save_jpeg(canvas), mode
 
 def process_simple(source: Image.Image) -> tuple[bytes, str]:
     """
@@ -487,7 +528,15 @@ def process_image(
     if requested_mode == "detail":
 
         return process_detail(
-            source
+            source,
+            keep_edge="bottom",
+        )
+    
+    if requested_mode == "detail_bottom":
+    
+        return process_detail(
+            source,
+            keep_edge="top",
         )
 
     # --------------------------------------------------------
@@ -546,6 +595,7 @@ def handler(event):
             "simple",
             "smart",
             "detail",
+            "detail_bottom",
         }:
 
             return {
