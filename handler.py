@@ -321,6 +321,7 @@ def process_auto(source: Image.Image) -> tuple[bytes, str]:
     scale = min(
         max_width / cutout.width,
         max_height / cutout.height,
+        1.25,
     )
 
     new_width = max(
@@ -364,11 +365,92 @@ def process_auto(source: Image.Image) -> tuple[bytes, str]:
 
     return save_jpeg(canvas), mode
 
+# ============================================================
+# DETAIL MODE
+# Background removal without object zoom or bbox cropping
+# ============================================================
 
+def process_detail(source: Image.Image) -> tuple[bytes, str]:
+
+    original = source.copy()
+
+    original.thumbnail(
+        (AI_MAX_SIZE, AI_MAX_SIZE),
+        Image.Resampling.LANCZOS,
+    )
+
+    # Remove background using BiRefNet
+    cutout = remove(
+        original,
+        session=session,
+    ).convert("RGBA")
+
+    alpha = cutout.getchannel("A")
+
+    alpha = alpha.filter(
+        ImageFilter.MinFilter(3)
+    )
+
+    cutout.putalpha(alpha)
+
+    if alpha.getbbox() is None:
+        raise ValueError(
+            "DETAIL: AI could not detect the product."
+        )
+
+    # Keep original composition.
+    # Do not crop to detected object bbox.
+    # Do not enlarge the garment detail.
+
+    scale = min(
+        CANVAS_SIZE / cutout.width,
+        CANVAS_SIZE / cutout.height,
+        1.0,
+    )
+
+    new_width = max(
+        1,
+        round(cutout.width * scale),
+    )
+
+    new_height = max(
+        1,
+        round(cutout.height * scale),
+    )
+
+    if scale != 1.0:
+        cutout = cutout.resize(
+            (new_width, new_height),
+            Image.Resampling.LANCZOS,
+        )
+
+    canvas = Image.new(
+        "RGB",
+        (CANVAS_SIZE, CANVAS_SIZE),
+        BACKGROUND,
+    )
+
+    x = (CANVAS_SIZE - cutout.width) // 2
+    y = (CANVAS_SIZE - cutout.height) // 2
+
+    canvas.paste(
+        cutout,
+        (x, y),
+        cutout,
+    )
+
+    print(
+        f"DETAIL: source={source.width}x{source.height}, "
+        f"object={cutout.width}x{cutout.height}, "
+        f"canvas={CANVAS_SIZE}x{CANVAS_SIZE}",
+        flush=True,
+    )
+
+    return save_jpeg(canvas), "DETAIL"
 
 def process_simple(source: Image.Image) -> tuple[bytes, str]:
     """
-    DETAIL režimas:
+    SIMPLE režimas:
     - Jokio BiRefNet
     - Jokio fono šalinimo
     - Jokio išplaukinto fono
@@ -387,13 +469,13 @@ def process_simple(source: Image.Image) -> tuple[bytes, str]:
     )
 
     print(
-        f"DETAIL: {source.width}x{source.height} "
+        f"SIMPLE: {source.width}x{source.height} "
         f"-> {CANVAS_SIZE}x{CANVAS_SIZE}, "
         f"center crop, no AI, no blur",
         flush=True,
     )
 
-    return save_jpeg(canvas), "DETAIL"
+    return save_jpeg(canvas), "SIMPLE"
 
 
 
@@ -417,6 +499,12 @@ def process_image(
     # SMART selects processing automatically for every image.
     if requested_mode == "smart":
         requested_mode = detect_image_type(source)
+
+    if requested_mode == "detail":
+
+        return process_detail(
+            source
+        )
 
     # --------------------------------------------------------
     # SIMPLE
@@ -473,6 +561,7 @@ def handler(event):
             "auto",
             "simple",
             "smart",
+            "detail",
         }:
 
             return {
