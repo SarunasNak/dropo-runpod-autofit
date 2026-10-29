@@ -374,6 +374,11 @@ def process_detail(
     keep_edge: str = "bottom",
 ) -> tuple[bytes, str]:
 
+    if keep_edge not in {"bottom", "top"}:
+        raise ValueError(
+            f"Invalid DETAIL edge: {keep_edge}"
+        )
+
     original = source.copy()
 
     original.thumbnail(
@@ -381,7 +386,10 @@ def process_detail(
         Image.Resampling.LANCZOS,
     )
 
-    # Remove background
+    # --------------------------------------------------------
+    # 1. REMOVE BACKGROUND
+    # --------------------------------------------------------
+
     cutout = remove(
         original,
         session=session,
@@ -400,9 +408,14 @@ def process_detail(
 
     left, top, right, bottom = bbox
 
+    # --------------------------------------------------------
+    # 2. CROP ONLY THE FREE EDGES
+    # --------------------------------------------------------
+
     if keep_edge == "bottom":
-        # DETAIL TOP:
-        # Preserve original bottom crop.
+
+        # DETAIL TOP
+        # Keep original bottom boundary.
         crop_box = (
             left,
             top,
@@ -410,9 +423,12 @@ def process_detail(
             original.height,
         )
 
-    elif keep_edge == "top":
-        # DETAIL BOTTOM:
-        # Preserve original top crop.
+        mode = "DETAIL_TOP"
+
+    else:
+
+        # DETAIL BOTTOM
+        # Keep original top boundary.
         crop_box = (
             left,
             0,
@@ -420,25 +436,45 @@ def process_detail(
             bottom,
         )
 
-    else:
-        raise ValueError(
-            f"Invalid DETAIL edge: {keep_edge}"
-        )
+        mode = "DETAIL_BOTTOM"
 
     cutout = cutout.crop(crop_box)
 
-    # Scale by width
+    if cutout.width <= 0 or cutout.height <= 0:
+        raise ValueError(
+            "DETAIL: Empty cropped image."
+        )
+
+    # --------------------------------------------------------
+    # 3. SCALE TO FILL THE REQUIRED AREA
+    # --------------------------------------------------------
+
     target_width = CANVAS_SIZE - (MARGIN * 2)
+    target_height = CANVAS_SIZE - MARGIN
 
-    scale = target_width / cutout.width
+    scale = max(
+        target_width / cutout.width,
+        target_height / cutout.height,
+    )
 
-    new_width = max(1, round(cutout.width * scale))
-    new_height = max(1, round(cutout.height * scale))
+    new_width = max(
+        1,
+        round(cutout.width * scale),
+    )
+
+    new_height = max(
+        1,
+        round(cutout.height * scale),
+    )
 
     cutout = cutout.resize(
         (new_width, new_height),
         Image.Resampling.LANCZOS,
     )
+
+    # --------------------------------------------------------
+    # 4. CREATE CANVAS
+    # --------------------------------------------------------
 
     canvas = Image.new(
         "RGB",
@@ -446,17 +482,26 @@ def process_detail(
         BACKGROUND,
     )
 
+    # Center horizontally.
     x = (CANVAS_SIZE - cutout.width) // 2
 
     if keep_edge == "bottom":
-        # Juosmuo: position near top.
+
+        # DETAIL TOP:
+        # 150 px above waistband.
+        # Legs extend beyond bottom canvas boundary.
         y = MARGIN
-        mode = "DETAIL_TOP"
 
     else:
-        # Klešnės: position near bottom.
+
+        # DETAIL BOTTOM:
+        # Legs extend beyond top canvas boundary.
+        # 150 px below hems.
         y = CANVAS_SIZE - MARGIN - cutout.height
-        mode = "DETAIL_BOTTOM"
+
+    # --------------------------------------------------------
+    # 5. PASTE (CANVAS CLIPS OVERFLOW)
+    # --------------------------------------------------------
 
     canvas.paste(
         cutout,
@@ -467,7 +512,9 @@ def process_detail(
     print(
         f"{mode}: "
         f"source={source.width}x{source.height}, "
-        f"object={cutout.width}x{cutout.height}",
+        f"crop={crop_box}, "
+        f"resized={cutout.width}x{cutout.height}, "
+        f"position=({x},{y})",
         flush=True,
     )
 
